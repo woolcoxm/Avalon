@@ -110,7 +110,8 @@ struct moe_disk_state {
         while (fgets(line, sizeof(line), f)) {
             unsigned long long start = 0, end = 0, offset = 0;
             char path[4096] = {};
-            if (sscanf(line, "%llx-%llx %*s %llx %*s %*s %4095[^\n]", &start, &end, &offset, path) < 4 ||
+            // the leading space skips the blanks before the path; [^\n] would take them in
+            if (sscanf(line, "%llx-%llx %*s %llx %*s %*s  %4095[^\n]", &start, &end, &offset, path) < 4 ||
                     path[0] != '/') {
                 continue;
             }
