@@ -274,7 +274,9 @@ struct moe_disk_state {
         }
         t_report = now;
         for (const auto & s : shards) {
-            GGML_LOG_INFO("moe-disk: slot %zu KiB x %d: %llu hits, %llu fills, %llu evictions, "
+            // stderr, not the ggml log: the tools silence INFO logs, these counters are
+            // exactly what GGML_CPU_MOE_DISK_STATS asked for
+            fprintf(stderr, "moe-disk: slot %zu KiB x %d: %llu hits, %llu fills, %llu evictions, "
                     "%llu fallbacks, fill avg %.2f ms max %.2f ms\n",
                     s->slot_bytes >> 10, s->arena.n_slots,
                     (unsigned long long) s->arena.hits, (unsigned long long) s->arena.writes,
