@@ -8,6 +8,11 @@ extern "C" {
 
 struct ggml_tensor;
 
+// the tier's env switch (GGML_CPU_MOE_DISK, on by default). When on, the loader must keep
+// the expert weights file-mapped in the plain CPU buffer: the tier reads the file itself,
+// and a repacked second copy of the experts would not fit host memory beside the arena
+int ggml_cpu_moe_disk_enabled(void);
+
 // Whether the expert disk tier may serve this MUL_MAT_ID weight tensor: a host weights
 // buffer, more than one expert, and the tier enabled (GGML_CPU_MOE_DISK, on by default).
 // Cheap and stable: all threads of a node get the same answer.

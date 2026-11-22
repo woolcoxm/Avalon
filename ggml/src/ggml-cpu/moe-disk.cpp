@@ -15,6 +15,7 @@
 
 #include "ggml.h"
 #include "ggml-impl.h"
+#include "ggml-cpu.h"
 #include "ggml-backend-impl.h"
 #include "ggml-backend-moe-cache.h"
 
@@ -287,20 +288,28 @@ moe_disk_state g_state;
 
 bool weight_eligible(const struct ggml_tensor * w) {
     if (!w || w->op != GGML_OP_NONE || !w->data || w->ne[2] <= 1 ||
-            w->nb[0] != ggml_type_size(w->type) || w->nb[2] < ((size_t) 1 << 20)) {
+            w->nb[0] != ggml_type_size(w->type) || w->nb[2] < ((size_t) 128 << 10)) {
         return false;
     }
+    // the plain CPU buffer only: its weights are the mmap'd model file (or its copy), whose
+    // bytes the tier reads from disk. A repacked or otherwise transformed buffer holds a
+    // different layout, and the tier's fills would not match what compute expects
     const ggml_backend_buffer_t buffer = w->view_src ? w->view_src->buffer : w->buffer;
-    return buffer && ggml_backend_buffer_is_host(buffer) &&
+    return buffer && buffer->buft == ggml_backend_cpu_buffer_type() &&
+        ggml_backend_buffer_is_host(buffer) &&
         ggml_backend_buffer_get_usage(buffer) == GGML_BACKEND_BUFFER_USAGE_WEIGHTS;
 }
 
 } // namespace
 
-int ggml_cpu_moe_disk_wants(const struct ggml_tensor * w) {
+int ggml_cpu_moe_disk_enabled() {
     static const int enabled = getenv("GGML_CPU_MOE_DISK")
         ? atoi(getenv("GGML_CPU_MOE_DISK")) : 1;
-    if (!enabled || !weight_eligible(w)) {
+    return enabled;
+}
+
+int ggml_cpu_moe_disk_wants(const struct ggml_tensor * w) {
+    if (!ggml_cpu_moe_disk_enabled() || !weight_eligible(w)) {
         return 0;
     }
     // the CUDA provider hosts its own arena for these weights: one tier, not two

@@ -8,6 +8,7 @@
 #include "ggml-cpu-impl.h"
 #include "simd-mappings.h"
 #include "traits.h"
+#include "moe-disk.h"
 
 #include "arch-fallback.h"
 
@@ -5216,6 +5217,12 @@ class extra_buffer_type : ggml::cpu::extra_buffer_type {
                 && op->src[0]->buffer->buft == ggml_backend_cpu_repack_buffer_type()
                 && ggml_repack_get_optimal_repack_type(op->src[0])
                 ) {
+            // the expert disk tier owns the experts when enabled: they stay file-mapped in
+            // the plain CPU buffer (one copy, read with O_DIRECT), not repacked into a
+            // second copy that would not fit host memory beside the tier's arena
+            if (ggml_cpu_moe_disk_enabled()) {
+                return false;
+            }
             if (op->src[1]->buffer && !ggml_backend_buft_is_host(op->src[1]->buffer->buft)) {
                 return false;
             }
