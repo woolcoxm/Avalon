@@ -1152,11 +1152,12 @@ static bool tiled_matmul_dispatch(const struct ggml_compute_params * params,
                                   const int32_t * expert_rows,
                                   int64_t cur_a,
                                   int64_t cne1,
-                                  char * scratch) {
+                                  char * scratch,
+                                  const char * src0_cur) {
     if (expert_rows == NULL) {
         ggml_compute_forward_mul_mat_tiled_driver<B, SUBBLK, HAS_MIN, BIAS, ACTBIAS>(params, dst);
     } else {
-        ggml_compute_forward_mul_mat_id_tiled_one_expert<B, SUBBLK, HAS_MIN, BIAS, ACTBIAS>(params, dst, cur_a, cne1, expert_rows, scratch);
+        ggml_compute_forward_mul_mat_id_tiled_one_expert<B, SUBBLK, HAS_MIN, BIAS, ACTBIAS>(params, dst, cur_a, cne1, expert_rows, scratch, src0_cur);
     }
     return true;
 }
