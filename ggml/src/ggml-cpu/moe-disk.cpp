@@ -377,14 +377,16 @@ const void * ggml_cpu_moe_disk_ensure(const struct ggml_tensor * w, int64_t expe
             return (const void *) addr;
         }
 
-        // a whole file that fits the budget gains nothing from the tier: after the cold
-        // pass every expert would be a hit, and each node still pays lookup and pin.
-        // Measured on OLMoE (4.2 GiB model, 97 % hit rate): ~13 % slower generation
+        // a model that fits the budget gains nothing from the tier: after the cold pass
+        // every expert would be a hit, and each node still pays lookup and pin. Measured
+        // on OLMoE (4.2 GiB model, 97 % hit rate): ~13 % slower generation. All weight
+        // files are mapped at load, so the large mappings here are the whole model (a
+        // split whose shards each fit but together do not must keep the tier)
         if (!g.fit_checked && m) {
             g.fit_checked = true;
             size_t file_bytes = 0;
             for (const auto & e : g.maps) {
-                if (e.fd == m->fd) {
+                if (e.fd >= 0 && e.end - e.start >= ((size_t) 128 << 20)) {
                     file_bytes += e.end - e.start;
                 }
             }
@@ -392,8 +394,8 @@ const void * ggml_cpu_moe_disk_ensure(const struct ggml_tensor * w, int64_t expe
                 ? atoi(getenv("GGML_CPU_MOE_DISK_FIT")) : 1;
             if (fit_rule && file_bytes && file_bytes <= g.budget_bytes) {
                 g.fit_off = true;
-                fprintf(stderr, "moe-disk: model file %.2f GiB fits the arena budget %.2f GiB:"
-                        " tier off, the page cache serves it\n",
+                fprintf(stderr, "moe-disk: model files total %.2f GiB fit the arena budget %.2f GiB:"
+                        " tier off, the page cache serves them\n",
                         file_bytes / 1073741824.0, g.budget_bytes / 1073741824.0);
                 g.n_fallback++;
                 return (const void *) addr;
