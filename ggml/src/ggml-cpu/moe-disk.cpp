@@ -293,9 +293,10 @@ bool weight_eligible(const struct ggml_tensor * w) {
     }
     // the file-backed check is at ensure time (find_mapping): a weight whose bytes are not
     // the model file's (a repacked copy in the heap, another layout) finds no mapping there
-    // and falls back to its own address, so this stays a cheap shape and host check
+    // and falls back to its own address. The host check is at the buffer type level: the
+    // from_ptr buffer iface that mmap'd weights use has no is_host of its own
     const ggml_backend_buffer_t buffer = w->view_src ? w->view_src->buffer : w->buffer;
-    return buffer && ggml_backend_buffer_is_host(buffer) &&
+    return buffer && ggml_backend_buft_is_host(buffer->buft) &&
         ggml_backend_buffer_get_usage(buffer) == GGML_BACKEND_BUFFER_USAGE_WEIGHTS;
 }
 
@@ -314,6 +315,12 @@ int ggml_cpu_moe_disk_wants(const struct ggml_tensor * w) {
     // the CUDA provider hosts its own arena for these weights: one tier, not two
     if (ggml_moe_cache.begin) {
         return 0;
+    }
+    if (getenv("GGML_CPU_MOE_DISK_STATS")) {
+        static const bool announced = (fprintf(stderr, "moe-disk: tier active for %s (%s x%d experts, %lld KiB slices)\n",
+            w->name ? w->name : "?", ggml_type_name(w->type), (int) w->ne[2],
+            (long long) (w->nb[2] >> 10)), true);
+        GGML_UNUSED(announced);
     }
     return 1;
 }
