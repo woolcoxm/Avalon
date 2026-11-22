@@ -291,12 +291,11 @@ bool weight_eligible(const struct ggml_tensor * w) {
             w->nb[0] != ggml_type_size(w->type) || w->nb[2] < ((size_t) 128 << 10)) {
         return false;
     }
-    // the plain CPU buffer only: its weights are the mmap'd model file (or its copy), whose
-    // bytes the tier reads from disk. A repacked or otherwise transformed buffer holds a
-    // different layout, and the tier's fills would not match what compute expects
+    // the file-backed check is at ensure time (find_mapping): a weight whose bytes are not
+    // the model file's (a repacked copy in the heap, another layout) finds no mapping there
+    // and falls back to its own address, so this stays a cheap shape and host check
     const ggml_backend_buffer_t buffer = w->view_src ? w->view_src->buffer : w->buffer;
-    return buffer && buffer->buft == ggml_backend_cpu_buffer_type() &&
-        ggml_backend_buffer_is_host(buffer) &&
+    return buffer && ggml_backend_buffer_is_host(buffer) &&
         ggml_backend_buffer_get_usage(buffer) == GGML_BACKEND_BUFFER_USAGE_WEIGHTS;
 }
 
