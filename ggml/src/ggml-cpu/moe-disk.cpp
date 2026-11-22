@@ -278,11 +278,13 @@ struct moe_disk_state {
         t_report = now;
         for (const auto & s : shards) {
             // stderr, not the ggml log: the tools silence INFO logs, these counters are
-            // exactly what GGML_CPU_MOE_DISK_STATS asked for
-            fprintf(stderr, "moe-disk: slot %zu KiB x %d: %llu hits, %llu fills, %llu evictions, "
+            // exactly what GGML_CPU_MOE_DISK_STATS asked for. The hits are this tier's own
+            // count: the arena template does not count them (the CUDA cache layer does)
+            fprintf(stderr, "moe-disk: slot %zu KiB x %d: %llu hits of %llu ensures, %llu fills, %llu evictions, "
                     "%llu fallbacks, fill avg %.2f ms max %.2f ms\n",
                     s->slot_bytes >> 10, s->arena.n_slots,
-                    (unsigned long long) s->arena.hits, (unsigned long long) s->arena.writes,
+                    (unsigned long long) (n_hit), (unsigned long long) n_ensure,
+                    (unsigned long long) s->arena.writes,
                     (unsigned long long) s->arena.evictions, (unsigned long long) n_fallback,
                     n_fill ? 1e-3 * fill_us / n_fill : 0.0, 1e-3 * fill_us_max);
         }
