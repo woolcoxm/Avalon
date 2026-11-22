@@ -358,6 +358,12 @@ const void * ggml_cpu_moe_disk_ensure(const struct ggml_tensor * w, int64_t expe
 
         m = g.find_mapping(addr, slice_bytes);
         if (!m || m->fd < 0) {
+            if (getenv("GGML_CPU_MOE_DISK_STATS")) {
+                static const bool said = (fprintf(stderr, "moe-disk: no mapping for %p + %zu KiB (%s), table %zu spans\n",
+                    (void *) addr, slice_bytes >> 10, m && m->fd < 0 ? "fd failed" : "none",
+                    g.maps.size()), true);
+                GGML_UNUSED(said);
+            }
             g.n_fallback++;
             g.report();
             return (const void *) addr;
