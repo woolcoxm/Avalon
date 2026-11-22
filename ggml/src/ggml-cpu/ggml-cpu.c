@@ -15,6 +15,7 @@
 #include "ggml.h"
 #include "common.h"
 #include "tiled/tiled.h"
+#include "moe-disk.h"
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
 #include <malloc.h> // using malloc.h with MSC/MINGW
@@ -1658,6 +1659,16 @@ static void ggml_compute_forward_mul_mat_id_impl(
     char (*atomic_current_chunk)[CACHE_LINE_SIZE] = // [n_as]
         incr_ptr_aligned(&wdata_cur, CACHE_LINE_SIZE * n_as, CACHE_LINE_SIZE);
 
+    // expert disk tier (see moe-disk.h): the experts' slices in the arena, one pointer each,
+    // and the counter the fill phase claims experts with
+    const bool moe_disk = ggml_cpu_moe_disk_wants(src0);
+    atomic_int * moe_disk_fill = NULL;
+    const char ** moe_disk_ptrs = NULL; // [n_as]
+    if (moe_disk) {
+        moe_disk_fill = incr_ptr_aligned(&wdata_cur, sizeof(atomic_int), CACHE_LINE_SIZE);
+        moe_disk_ptrs = incr_ptr_aligned(&wdata_cur, n_as*sizeof(const char *), sizeof(const char *));
+    }
+
     // Tiled matmul (see tiled.h); per-thread work buffers, 0 bytes when disabled. The
     // reservation is unconditional, the per expert eligibility is decided at dispatch time
     char * tiled_scratch = incr_ptr_aligned(&wdata_cur, ggml_tiled_wdata_size(nth, dst), 64);
@@ -1792,6 +1803,9 @@ static void ggml_compute_forward_mul_mat_id_impl(
             moe_cache_node = NULL;
         }
         moe_t_disp = ggml_time_us();
+        if (moe_disk) {
+            atomic_store_explicit(moe_disk_fill, 0, memory_order_relaxed);
+        }
     }
 
     // reset current_chunk
@@ -1802,6 +1816,17 @@ static void ggml_compute_forward_mul_mat_id_impl(
 
     ggml_barrier(params->threadpool);
 
+    if (moe_disk) {
+        // the experts this node routes to, read into the arena before the compute (in
+        // parallel: each thread claims an expert with the counter), then the compute reads
+        // its slices from the slots
+        for (int cur_a; (cur_a = atomic_fetch_add_explicit(moe_disk_fill, 1, memory_order_relaxed)) < n_as;) {
+            moe_disk_ptrs[cur_a] = matrix_row_counts[cur_a] > 0 ?
+                (const char *) ggml_cpu_moe_disk_ensure(src0, cur_a) : NULL;
+        }
+        ggml_barrier(params->threadpool);
+    }
+
     for (int cur_a = 0; cur_a < n_as; ++cur_a) {
         const int64_t cne1 = matrix_row_counts[cur_a];
 
@@ -1809,12 +1834,15 @@ static void ggml_compute_forward_mul_mat_id_impl(
             continue;
         }
 
+        const char * src0_cur = moe_disk ?
+            (moe_disk_ptrs[cur_a] ? moe_disk_ptrs[cur_a] : (const char *) src0->data + cur_a * nb02) :
+            (const char *) src0->data + cur_a * nb02;
+
         // tiled takes over if profitable for this expert (see tiled.h)
-        if (ggml_compute_forward_mul_mat_id_tiled(params, dst, cur_a, cne1, (const int32_t *) &MMID_MATRIX_ROW(cur_a, 0), tiled_scratch)) {
+        if (ggml_compute_forward_mul_mat_id_tiled(params, dst, cur_a, cne1, (const int32_t *) &MMID_MATRIX_ROW(cur_a, 0), tiled_scratch, src0_cur)) {
             continue;
         }
 
-        const char * src0_cur = (const char *) src0->data + cur_a * nb02;
         const void * wdata = (src1->type == vec_dot_type) ? src1->data : params->wdata;
         const size_t row_size = ggml_row_size(vec_dot_type, ne10);
 
@@ -1891,6 +1919,14 @@ static void ggml_compute_forward_mul_mat_id_impl(
             }
         }
         ggml_moe_cache.end(moe_cache_node);
+    }
+
+    if (moe_disk) {
+        // every thread done with the slices: behind a barrier, one thread unpins them
+        ggml_barrier(params->threadpool);
+        if (ith == 0) {
+            ggml_cpu_moe_disk_node_end();
+        }
     }
 }
 
@@ -3133,6 +3169,8 @@ struct ggml_cplan ggml_graph_plan(
                         cur += n_as*ids->ne[0]*ids->ne[1]*sizeof(struct mmid_row_mapping) + sizeof(int64_t);
                         // atomic_current_chunk
                         cur += CACHE_LINE_SIZE*n_as + CACHE_LINE_SIZE;
+                        // expert disk tier: one slice pointer per expert, and the fill counter
+                        cur += GGML_PAD(n_as*(int64_t)sizeof(void *), CACHE_LINE_SIZE) + CACHE_LINE_SIZE;
                         // Workspace for tiled (see tiled.h)
                         cur = GGML_PAD(cur, 64);
                         cur += ggml_tiled_wdata_size(n_tasks, node);

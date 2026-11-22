@@ -45,6 +45,9 @@ function(ggml_add_cpu_backend_variant_impl tag_name)
         ggml-cpu/tiled/tiled.h
         ggml-cpu/tiled/tiled-kernel.cpp
         ggml-cpu/tiled/tiled-kernel.h
+        ggml-cpu/moe-arena.h
+        ggml-cpu/moe-disk.cpp
+        ggml-cpu/moe-disk.h
         ggml-cpu/ggml-cpu-impl.h
         ggml-cpu/common.h
         ggml-cpu/binary-ops.h

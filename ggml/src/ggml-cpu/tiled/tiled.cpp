@@ -856,7 +856,7 @@ static void ggml_compute_forward_mul_mat_id_tiled_one_expert(
     const size_t nbw1 = (src1->type == vec_dot_type) ? nb11 : ggml_row_size(vec_dot_type, ne10);
     const void * wdata = (src1->type == vec_dot_type) ? src1->data : params->wdata;
 
-    const char * src0_cur = (const char *) src0->data + cur_a * nb02;
+    const char * src0_cur = src0_cur_in ? src0_cur_in : (const char *) src0->data + cur_a * nb02;
 
     // this thread's workspace
     tiled_ws * ws = (tiled_ws *) (scratch + (size_t) ith * ggml_tiled_ws_size());
@@ -1230,7 +1230,8 @@ bool ggml_compute_forward_mul_mat_id_tiled(
         int64_t                            cur_a,
         int64_t                            cne1,
         const int32_t *                    expert_rows,
-        char *                             scratch) {
+        char *                             scratch,
+        const char *                       src0_cur) {
     if (params->use_ref) {
         return false;
     }
@@ -1241,5 +1242,5 @@ bool ggml_compute_forward_mul_mat_id_tiled(
     if (!ggml_tiled_min_batch(cne1)) {
         return false;
     }
-    return ggml_tiled_matmul_type_dispatch(params, dst, expert_rows, cur_a, cne1, scratch);
+    return ggml_tiled_matmul_type_dispatch(params, dst, expert_rows, cur_a, cne1, scratch, src0_cur);
 }

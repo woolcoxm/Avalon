@@ -18,13 +18,16 @@ bool ggml_compute_forward_mul_mat_tiled(const struct ggml_compute_params * param
 // MUL_MAT_ID (MoE) path, one expert; returns true if the expert was computed here, per expert
 // eligibility (type gate, batch floor) is decided inside. expert_rows points at the expert's
 // row of the matrix_rows table of (expert slot, batch row) int32 pairs; scratch is the
-// per-thread tiled_ws region reserved in wdata, n_tasks of ggml_tiled_ws_size() bytes
+// per-thread tiled_ws region reserved in wdata, n_tasks of ggml_tiled_ws_size() bytes.
+// src0_cur is where this expert's weights are read from (the expert disk tier's slot, or the
+// tensor's own memory); NULL reads them from src0->data + cur_a * src0->nb[2]
 bool ggml_compute_forward_mul_mat_id_tiled(const struct ggml_compute_params * params,
                                            struct ggml_tensor *               dst,
                                            int64_t                            cur_a,
                                            int64_t                            cne1,
                                            const int32_t *                    expert_rows,
-                                           char *                             scratch);
+                                           char *                             scratch,
+                                           const char *                       src0_cur);
 
 #ifdef __cplusplus
 }
