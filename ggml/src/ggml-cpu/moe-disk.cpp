@@ -64,6 +64,10 @@ struct moe_disk_state {
     std::unordered_map<std::string, int> fd_cache;
     std::vector<std::unique_ptr<moe_disk_shard>> shards;   // stable: a fill reads its shard without the lock
     std::vector<std::pair<expert_arena *, int>> pinned;   // this node's slices, by slot
+    // a model file that fits the arena budget: the tier would cache all of it and still
+    // charge every node the lookup and the pin (measured on OLMoE: ~13 % slower generation)
+    bool fit_checked = false;
+    bool fit_off = false;
     // counters
     uint64_t n_ensure = 0, n_hit = 0, n_fill = 0, n_fallback = 0;
     uint64_t fill_us = 0, fill_us_max = 0;
@@ -316,7 +320,7 @@ int ggml_cpu_moe_disk_enabled() {
 }
 
 int ggml_cpu_moe_disk_wants(const struct ggml_tensor * w) {
-    if (!ggml_cpu_moe_disk_enabled() || !weight_eligible(w)) {
+    if (!ggml_cpu_moe_disk_enabled() || g_state.fit_off || !weight_eligible(w)) {
         return 0;
     }
     // the CUDA provider hosts its own arena for these weights: one tier, not two
@@ -371,6 +375,29 @@ const void * ggml_cpu_moe_disk_ensure(const struct ggml_tensor * w, int64_t expe
             g.n_fallback++;
             g.report();
             return (const void *) addr;
+        }
+
+        // a whole file that fits the budget gains nothing from the tier: after the cold
+        // pass every expert would be a hit, and each node still pays lookup and pin.
+        // Measured on OLMoE (4.2 GiB model, 97 % hit rate): ~13 % slower generation
+        if (!g.fit_checked && m) {
+            g.fit_checked = true;
+            size_t file_bytes = 0;
+            for (const auto & e : g.maps) {
+                if (e.fd == m->fd) {
+                    file_bytes += e.end - e.start;
+                }
+            }
+            static const bool fit_rule = getenv("GGML_CPU_MOE_DISK_FIT")
+                ? atoi(getenv("GGML_CPU_MOE_DISK_FIT")) : 1;
+            if (fit_rule && file_bytes && file_bytes <= g.budget_bytes) {
+                g.fit_off = true;
+                fprintf(stderr, "moe-disk: model file %.2f GiB fits the arena budget %.2f GiB:"
+                        " tier off, the page cache serves it\n",
+                        file_bytes / 1073741824.0, g.budget_bytes / 1073741824.0);
+                g.n_fallback++;
+                return (const void *) addr;
+            }
         }
 
         slot = s->arena.take(addr, 0);
