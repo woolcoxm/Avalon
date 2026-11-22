@@ -94,7 +94,9 @@ struct moe_disk_state {
 
     bool read_maps() {
 #if defined(__linux__)
-        static int64_t last = INT64_MIN;
+        // zero, not the int64 minimum: now minus the minimum overflows and reads negative,
+        // and the first call would leave the table empty forever
+        static int64_t last = 0;
         const int64_t now = ggml_time_us();
         if (now - last < 1000000) {   // a failing lookup retries at most once a second
             return !maps.empty();
